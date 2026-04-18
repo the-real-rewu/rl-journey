@@ -29,11 +29,12 @@ Each card should have:
 ## Index
 
 ### Foundations
-*(cards will be added as you work through Phase 1)*
 
 | Skill | Summary | Phase |
 |-------|---------|-------|
-| — | — | — |
+| [mdp.md](mdp.md) | MDP 5-tuple, stationarity, Markov property, when the framing breaks | 1.1 |
+| [bellman_equations.md](bellman_equations.md) | Value = immediate reward + discounted next value; expectation vs optimality forms | 1.1 |
+| [value_functions.md](value_functions.md) | V(s) vs Q(s,a) — what they measure, how they relate, why Q wins in model-free settings | 1.1 |
 
 ### Value-Based Methods
 *(cards will be added as you work through Phase 1–2)*
