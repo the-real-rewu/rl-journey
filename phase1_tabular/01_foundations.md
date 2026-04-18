@@ -13,9 +13,9 @@ An MDP is a 5-tuple `(S, A, P, R, γ)`:
 |--------|------|------------|
 | `S` | States | The set of situations the agent can be in |
 | `A` | Actions | The set of choices the agent can make |
-| `P(s' | s, a)` | Transition function | Probability of landing in `s'` after taking action `a` in state `s` |
-| `R(s, a, s')` | Reward function | Scalar reward received for that transition |
-| `γ ∈ [0, 1]` | Discount factor | How much future rewards matter relative to immediate ones |
+| `P(s'\|s,a)` | Transition function | Probability of landing in `s'` after action `a` in state `s` |
+| `R(s,a,s')` | Reward function | Scalar reward for that transition |
+| `γ ∈ [0,1]` | Discount factor | How much future rewards matter versus immediate ones |
 
 **The Markov property.** "The future depends only on the present, not the
 past." Formally: `P(s_{t+1} | s_t, a_t) = P(s_{t+1} | s_t, a_t, s_{t-1}, ...)`.
