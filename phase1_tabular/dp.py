@@ -39,6 +39,7 @@ def policy_evaluation(
         V: dict mapping state -> float (converged value function)
     """
     V = {s: 0.0 for s in env.states}
+    num_iterations = 0
 
     while True:
         delta = 0.0
@@ -62,13 +63,16 @@ def policy_evaluation(
             #  so it generalises.)
             #
             # Remove the line below and replace with your implementation:
-            raise NotImplementedError("implement policy_evaluation update")
-
+            action = policy[s] # deterministic policy: one action per state
+            V[s] = 0.0 # in-place update of V[s]
+            for prob, next_state, reward, done in env.transitions(s, action):
+                V[s] += prob * (reward + gamma * V[next_state])
             delta = max(delta, abs(v_old - V[s]))
+        num_iterations += 1
 
         if delta < theta:
             break
-
+    print(f"Policy evaluation converged in {num_iterations} iterations.")
     return V
 
 
@@ -101,8 +105,15 @@ def policy_improvement(
         # iterate over all actions and compare.
         #
         # Remove the line below and replace with your implementation:
-        raise NotImplementedError("implement policy_improvement")
-
+        best_action, best_q = None, float("-inf")
+        for action in range(env.num_actions):
+            q_action = 0.0
+            for prob, next_state, reward, done in env.transitions(s, action):
+                q_action += prob * (reward + gamma * V[next_state])
+            if q_action > best_q:
+                best_q = q_action
+                best_action = action
+        policy[s] = best_action
     return policy
 
 
@@ -130,8 +141,16 @@ def policy_iteration(
     # They are stable if policy[s] == new_policy[s] for all s.
     #
     # Remove the line below and replace with your implementation:
-    raise NotImplementedError("implement policy_iteration")
-
+    V = policy_evaluation(env, policy, gamma, theta)
+    new_policy = policy_improvement(env, V, gamma)
+    num_iterations = 0
+    while new_policy != policy:
+        policy = new_policy
+        V = policy_evaluation(env, policy, gamma, theta)
+        new_policy = policy_improvement(env, V, gamma)
+        num_iterations += 1
+    print(f"Policy iteration converged in {num_iterations} iterations.")
+    return V, policy
 
 def value_iteration(
     env: GridWorld,
@@ -145,6 +164,7 @@ def value_iteration(
         policy: dict mapping state -> action
     """
     V = {s: 0.0 for s in env.states}
+    num_iterations = 0
 
     while True:
         delta = 0.0
@@ -164,13 +184,51 @@ def value_iteration(
             # Compute Q(s,a) for all actions, then set V[s] = max Q.
             #
             # Remove the line below and replace with your implementation:
-            raise NotImplementedError("implement value_iteration update")
-
+            max_q = float("-inf")
+            for action in range(env.num_actions):
+                q_value = 0.0
+                for prob, next_state, reward, done in env.transitions(s, action):
+                    q_value += prob * (reward + gamma * V[next_state])
+                max_q = max(max_q, q_value)
+            V[s] = max_q
             delta = max(delta, abs(v_old - V[s]))
 
+        num_iterations += 1
         if delta < theta:
             break
-
+    print(f"Value iteration converged in {num_iterations} iterations.")
     # Extract the greedy policy from the converged V*.
     policy = policy_improvement(env, V, gamma)
     return V, policy
+
+
+if __name__ == "__main__":
+    # Question1: compare iterations to converge for policy iteration vs value iteration
+    environment = GridWorld(rows=4, cols=4)
+    gamma = 0.9
+    print("\nRunning policy iteration...")
+    V_pi, policy_pi = policy_iteration(environment, gamma=gamma)
+    print("\nPolicy iteration: ", V_pi)
+    print("\nRunning value iteration...")
+    V_vi, policy_vi = value_iteration(environment, gamma=gamma)
+    print("\nValue iteration: ", V_vi )
+
+    # Question2: add a wall and see how the optimal policy changes
+    environment_with_wall = GridWorld(rows=4, cols=4, walls=[(2, 2)], hazards=[(1, 2)])
+    print("\nRunning policy iteration with wall...")
+    V_pi_wall, policy_pi_wall = policy_iteration(environment_with_wall, gamma=gamma)
+    print("\nPolicy iteration with wall: ", V_pi_wall)
+    print("\nRunning value iteration with wall...")
+    V_vi_wall, policy_vi_wall = value_iteration(environment_with_wall, gamma=gamma)
+    print("\nValue iteration with wall: ", V_vi_wall)
+
+    # Question3: Try γ = 0.5 vs γ = 0.99 — what does the value function look like?
+    for gamma in [0.5, 0.99]:
+        print(f"\nRunning policy iteration with gamma={gamma}...")
+        V_pi_gamma, policy_pi_gamma = policy_iteration(environment, gamma=gamma)
+        print(f"\nPolicy iteration with gamma={gamma}: ", V_pi_gamma)
+    
+    # Question4: What happens with a very tight convergence threshold (θ = 1e-10)?
+    print("\nRunning policy iteration with tight convergence threshold...")
+    V_vi_tight, policy_vi_tight = value_iteration(environment, gamma=gamma, theta=1e-14)
+    print("\nValue iteration with tight convergence threshold: ", V_vi_tight)
