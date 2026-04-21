@@ -36,12 +36,14 @@ Each card should have:
 | [bellman_equations.md](bellman_equations.md) | Value = immediate reward + discounted next value; expectation vs optimality forms | 1.1 |
 | [value_functions.md](value_functions.md) | V(s) vs Q(s,a) — what they measure, how they relate, why Q wins in model-free settings | 1.1 |
 
-### Value-Based Methods
-*(cards will be added as you work through Phase 1–2)*
+### Dynamic Programming
 
 | Skill | Summary | Phase |
 |-------|---------|-------|
-| — | — | — |
+| [policy_evaluation.md](policy_evaluation.md) | Iterative Bellman sweeps to compute V^π for a fixed policy | 1.2 |
+| [policy_iteration.md](policy_iteration.md) | Alternate eval and greedy improvement; guaranteed finite convergence | 1.2 |
+| [value_iteration.md](value_iteration.md) | Solve Bellman optimality directly with one sweep per iteration | 1.2 |
+| [generalized_policy_iteration.md](generalized_policy_iteration.md) | The unifying pattern behind every RL algorithm, from DP to DQN to PPO | 1.2 |
 
 ### Policy Gradient Methods
 *(cards will be added as you work through Phase 3)*
