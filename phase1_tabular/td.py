@@ -24,6 +24,7 @@ def td0_prediction(
     num_episodes: int = 1000,
     max_steps: int = 200,
     seed: int | None = None,
+    action_uncertainty: float = 0.0,
 ) -> dict:
     """Estimate V^π using TD(0).
 
@@ -46,6 +47,8 @@ def td0_prediction(
 
         for _ in range(max_steps):
             action = policy[state]
+            if action_uncertainty > 0 and random.random() < action_uncertainty:
+                action = random.choice([a for a in range(env.num_actions)])
             next_state, reward, done, _ = env.step(action)
 
             # TODO: Apply the TD(0) update.
@@ -59,8 +62,10 @@ def td0_prediction(
             #   V[state] += alpha * td_error
             #
             # Remove the line below and replace with your implementation:
-            raise NotImplementedError("implement TD(0) update")
-
+            td_target = reward + (gamma * V[next_state] if not done else 0)
+            td_error = td_target - V[state]
+            V[state] += alpha * td_error
+            
             if done:
                 break
             state = next_state
