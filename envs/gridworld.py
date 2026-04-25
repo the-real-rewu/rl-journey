@@ -49,8 +49,10 @@ class GridWorld:
 
     # ---- Gym-style interface (for model-free methods) ----
 
-    def reset(self) -> tuple[int, int]:
-        self._agent = self.start
+    def reset(self, start: tuple[int, int] | None = None) -> tuple[int, int]:
+        """Reset the agent. If `start` is given, place the agent there
+        (useful for exploring-starts in Monte Carlo prediction)."""
+        self._agent = start if start is not None else self.start
         return self._agent
 
     def step(self, action: int) -> tuple[tuple[int, int], float, bool, dict]:
