@@ -45,6 +45,14 @@ Each card should have:
 | [value_iteration.md](value_iteration.md) | Solve Bellman optimality directly with one sweep per iteration | 1.2 |
 | [generalized_policy_iteration.md](generalized_policy_iteration.md) | The unifying pattern behind every RL algorithm, from DP to DQN to PPO | 1.2 |
 
+### Model-Free Prediction
+
+| Skill | Summary | Phase |
+|-------|---------|-------|
+| [monte_carlo_prediction.md](monte_carlo_prediction.md) | Average actual returns across trajectories; unbiased but high-variance | 1.3 |
+| [td_learning.md](td_learning.md) | Bootstrap off V[s'] each step; sampled DP without the model | 1.3 |
+| [bias_variance_in_rl.md](bias_variance_in_rl.md) | MC vs TD tradeoff, the n-step spectrum, why TD usually wins in practice | 1.3 |
+
 ### Policy Gradient Methods
 *(cards will be added as you work through Phase 3)*
 

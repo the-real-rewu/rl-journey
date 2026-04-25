@@ -17,7 +17,7 @@ one of the central ideas in RL.
 
 | | Phase 1.2 (DP) | Phase 1.3 (model-free) |
 |--|---------------|-----------------------|
-| You have | `P(s'|s,a)`, `R(s,a,s')` | Only what `env.step()` returns |
+| You have | `P(s'\|s,a)`, `R(s,a,s')` | Only what `env.step()` returns |
 | Updates use | Expectations over P | Sampled rewards/transitions |
 | Cost per state | Sum over all (s', a) | Process whatever you've seen |
 | Scales to | Small finite MDPs | Anything you can simulate |
