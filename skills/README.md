@@ -53,6 +53,15 @@ Each card should have:
 | [td_learning.md](td_learning.md) | Bootstrap off V[s'] each step; sampled DP without the model | 1.3 |
 | [bias_variance_in_rl.md](bias_variance_in_rl.md) | MC vs TD tradeoff, the n-step spectrum, why TD usually wins in practice | 1.3 |
 
+### Model-Free Control
+
+| Skill | Summary | Phase |
+|-------|---------|-------|
+| [epsilon_greedy.md](epsilon_greedy.md) | Exploration via randomness; cost at convergence; SARSA/Q-Learning asymmetry | 1.4 |
+| [sarsa.md](sarsa.md) | On-policy TD control; converges to Q^{π_ε}, not Q*; conservative near hazards | 1.4 |
+| [qlearning.md](qlearning.md) | Off-policy TD control; converges to Q*; optimistic about execution | 1.4 |
+| [on_off_policy.md](on_off_policy.md) | Behavior vs target policy; cliff-walking; why off-policy enables experience replay | 1.4 |
+
 ### Policy Gradient Methods
 *(cards will be added as you work through Phase 3)*
 

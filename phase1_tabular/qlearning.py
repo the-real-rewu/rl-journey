@@ -52,7 +52,11 @@ def qlearning(
             # The target uses the maximum Q value at next_state — you do not
             # need to know which action ε-greedy would actually take there.
             # At a terminal state, the future value is 0.
-            raise NotImplementedError
+            best_next_q = max(Q[(next_state, a)] for a in range(env.num_actions))
+            Q[(state, action)] += alpha * (reward + (0 if done else gamma * best_next_q) - Q[(state, action)])
+            #update the state
+            state = next_state
+            if done: break
 
     return Q
 
