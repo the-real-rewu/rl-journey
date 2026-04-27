@@ -211,27 +211,30 @@ two updates converge to the same value? Why?
 
 ### Exercise 4 — The On/Off-Policy Consequence
 
-A 2×4 GridWorld. Start = (1,0), Goal = (0,3). The bottom row (1,1) and (1,2)
-are cliffs (hazards, reward −10, episode ends).
+A 3×5 GridWorld. Start = (2,0), Goal = (2,4). The bottom row cells (2,1),
+(2,2), (2,3) are cliffs (hazards, reward −10, episode ends immediately).
 
 ```
-(0,0) → (0,1) → (0,2) → (0,3) GOAL
-  ↑               ↑         ↑
-(1,0)   (1,1)   (1,2)   (1,3)
-START  CLIFF   CLIFF
+(0,0) (0,1) (0,2) (0,3) (0,4)
+(1,0) (1,1) (1,2) (1,3) (1,4)
+(2,0) (2,1) (2,2) (2,3) (2,4)
+ START  C     C     C    GOAL
 ```
 
-Two meaningful paths from start to goal:
-- **Top path:** (1,0)→(0,0)→(0,1)→(0,2)→(0,3) — 4 steps, always safe
-- **Bottom path:** (1,0)→(1,3)→(0,3) — 2 steps, passes adjacent to cliffs
+Two paths from Start to Goal (every move is one step):
+- **Safe path:** go up to row 0, across, then back down —
+  (2,0)→(1,0)→(0,0)→(0,1)→(0,2)→(0,3)→(0,4)→(1,4)→(2,4), 8 steps
+- **Optimal path:** stay in row 1 adjacent to the cliffs —
+  (2,0)→(1,0)→(1,1)→(1,2)→(1,3)→(1,4)→(2,4), 6 steps
 
-Both algorithms run with ε = 0.1 until convergence.
+From any cell in row 1 above a cliff (e.g. (1,1)), the action DOWN leads
+directly into that cliff. Both algorithms run with ε = 0.1 until convergence.
 
-**Part A:** Q-Learning converges to the bottom path. Why? What does its
-update target assume about the agent's behavior at each step?
+**Part A:** Q-Learning converges to the optimal (6-step) path. Why? What does
+its update target assume about the agent's behavior at each step?
 
-**Part B:** SARSA converges to the top path. What does SARSA "see" on
-episodes where ε-greedy accidentally moves toward a cliff?
+**Part B:** SARSA converges to the safe (8-step) path. What does SARSA "see"
+on episodes where ε-greedy accidentally selects DOWN from (1,1), (1,2), or (1,3)?
 
 **Part C:** You need to deploy one algorithm's learned policy on a physical
 robot near a cliff. Which do you choose, and why?

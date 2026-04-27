@@ -30,7 +30,7 @@ CONFIG = {
     "algorithm": "both",        # "sarsa", "qlearning", or "both"
     "rows": 4,
     "cols": 4,
-    "hazards": [],              # list of (row, col) tuples, e.g. [(2,1),(2,2)]
+    "hazards": [(1,1),(1,2)],              # list of (row, col) tuples, e.g. [(2,1),(2,2)]
     "gamma": 0.9,
     "alpha": 0.1,
     "epsilon": 0.1,

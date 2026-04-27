@@ -52,7 +52,12 @@ def sarsa(
             # You need the next action before you can update — choose it now
             # using ε-greedy, then form the TD target from Q(next_state, next_action).
             # At a terminal state, the future value is 0.
-            raise NotImplementedError
+            next_action = epsilon_greedy(Q, next_state, env.num_actions, epsilon)
+            Q[(state, action)] += alpha * (reward + (0 if done else gamma * Q[(next_state, next_action)]) - Q[(state, action)])
+            #update the sate 
+            state = next_state
+            action = next_action
+            if done: break
 
     return Q
 
