@@ -174,7 +174,8 @@ Compute `G_0` and `G_1`.
 ### Exercise 2 — Value under a simple policy
 
 Same environment. Consider the deterministic policy "always go RIGHT".
-Starting from (0,0), the agent bumps the wall forever.
+Starting from (0,0), the agent moves to (0,1) on the first step, then
+bumps the right wall forever (staying at (0,1)).
 
 What is `V^π((0,0))`? (Hint: it's an infinite geometric series of step rewards.)
 

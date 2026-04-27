@@ -170,7 +170,8 @@ From state s you can take two actions:
 
 You're using Q-Learning with ε = 0.1. Q is initialized to 0 everywhere.
 
-By bad luck, the first 3 times a2 is tried it returns −8. Now Q(s, a2) = −8,
+By bad luck, the first 3 times a2 is tried it returns −8. Assume α = 1
+(replace, not average) for these first 3 episodes, so Q(s, a2) = −8,
 Q(s, a1) = 0.
 
 **Part A:** With ε = 0, what does the agent do from this point? Does it ever
