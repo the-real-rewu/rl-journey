@@ -17,7 +17,7 @@ rl-journey/
 ├── utils/                        ← Shared helpers (plotting, replay buffers, etc.)
 ├── notebooks/                    ← Jupyter notebooks for visualization & experiments
 ├── phase1_tabular/               ← Q-Learning, SARSA, Dynamic Programming
-├── phase2_dqn/                   ← DQN and its improvements on Mario
+├── phase2_dqn/                   ← DQN and its improvements on Atari Breakout
 ├── phase3_policy_gradient/       ← REINFORCE, A2C, PPO
 └── phase4_advanced/              ← Rainbow, curiosity, multi-agent, etc.
 ```
@@ -80,11 +80,13 @@ Q-table as a heatmap.
 
 ---
 
-## Phase 2 — Deep Q-Networks (Super Mario Bros)
+## Phase 2 — Deep Q-Networks (Atari Breakout)
 
-**Environment:** `gym-super-mario-bros` — NES Mario wrapped as a Gym environment.
-Raw pixel observations (240×256×3). This is where tabular methods break: the
-state space is effectively infinite.
+**Environment:** `ALE/Breakout-v5` via `gymnasium` + `ale-py`. Raw pixel
+observations (210×160×3), preprocessed to 84×84 grayscale with 4-frame
+stacking. This is the original DeepMind DQN benchmark environment and is
+identical in structure to Mario — the same preprocessing pipeline applies to
+any visual RL task.
 
 **Key idea:** Replace the Q-table with a neural network Q(s,a;θ) that
 generalizes across states.
@@ -102,7 +104,7 @@ generalizes across states.
 - [ ] CNN architecture for Atari-style pixel inputs
 - [ ] ε-decay schedule
 
-**Milestone:** Agent learns to move right and survive the first level section.
+**Milestone:** Agent learns to hit the ball and score consistently.
 
 ### 2.3 — DQN Improvements
 
@@ -111,7 +113,7 @@ generalizes across states.
 - [ ] Prioritized Experience Replay (PER) — sample important transitions more often
 - [ ] Multi-step returns — n-step TD targets
 
-**Milestone:** Agent completes World 1-1.
+**Milestone:** Agent consistently clears multiple brick rows.
 
 ---
 
@@ -142,8 +144,8 @@ are naturally stochastic (good for exploration), and scale to very complex polic
 - [ ] Clipped surrogate objective — constrain how much the policy can change per update
 - [ ] PPO in practice: mini-batch updates, entropy bonus, GAE (Generalized Advantage Estimation)
 
-**Milestone:** PPO agent consistently clears multiple Mario levels.
-Plot learning curves comparing DQN vs PPO.
+**Milestone:** PPO agent achieves higher average score than DQN on Breakout.
+Plot learning curves comparing DQN vs PPO sample efficiency.
 
 ---
 
@@ -165,6 +167,9 @@ specific frontiers.
 - [ ] Intrinsic Curiosity Module (ICM) — reward the agent for encountering
   novel states
 - [ ] Random Network Distillation (RND) — simpler curiosity signal
+
+*(Curiosity is especially relevant for sparse-reward environments like hard
+Atari games and procedurally-generated levels.)*
 
 ### 4.3 — Model-Based RL
 
