@@ -1,7 +1,7 @@
 """DQN agent: CNN architecture and training step.
 
 Run from repo root:
-    python -m phase2_dqn.dqn_agent
+    python3 -m phase2_dqn.dqn_agent
 """
 
 from __future__ import annotations
@@ -78,7 +78,7 @@ class DQNAgent:
         """ε-greedy action selection."""
         if random.random() < self.epsilon:
             return random.randrange(self.num_actions)
-        state_t = torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
+        state_t = torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0).div_(255.0)
         with torch.no_grad():
             return int(self.online(state_t).argmax(dim=1).item())
 
@@ -92,17 +92,24 @@ class DQNAgent:
         """
         states, actions, rewards, next_states, dones = batch
 
-        # TODO: implement the DQN training step.
-        # 1. Compute TD targets: r + γ * max_{a'} Q(s', a'; θ⁻) * (1 - done)
-        #    Use torch.no_grad() around the target network — its gradients
-        #    should never be computed.
-        # 2. Compute predictions: Q(s, a; θ) for the actions that were taken.
-        #    You need to gather the Q-value for each action in the batch.
-        # 3. Compute MSE loss between predictions and targets.
-        # 4. Zero gradients, backpropagate, clip gradients to norm 10, step.
-        # 5. Sync θ⁻ ← θ every self.target_update_freq steps.
-        # 6. Increment self.steps and return the loss as a Python float.
-        raise NotImplementedError
+        with torch.no_grad():
+            max_next_state_q = self.target(next_states).max(dim=1)[0]
+        td_targets = rewards + self.gamma * max_next_state_q * (1 - dones)
+        current_predictions = self.online(states).gather(1, actions.long().unsqueeze(1)).squeeze(1)
+        # Huber loss (smooth L1): caps gradient magnitude for large TD errors,
+        # preventing the Q-value overestimation spiral that MSE causes.
+        loss = F.smooth_l1_loss(current_predictions, td_targets)
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.online.parameters(), 10)
+        self.optimizer.step()
+
+        self.steps += 1
+        if self.steps % self.target_update_freq == 0:
+            self.target.load_state_dict(self.online.state_dict())
+
+        return loss.item()
 
     def save(self, path: str) -> None:
         torch.save({"online": self.online.state_dict(),

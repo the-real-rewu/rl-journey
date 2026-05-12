@@ -1,7 +1,7 @@
 """Experience replay buffer for DQN.
 
 Run from repo root:
-    python -m phase2_dqn.replay_buffer
+    python3 -m phase2_dqn.replay_buffer
 """
 
 from __future__ import annotations
@@ -32,7 +32,11 @@ class ReplayBuffer:
         # Initialise storage arrays here (use numpy for memory efficiency).
         # Think about the shape and dtype of each field before allocating.
         # The observation shape is (4, 84, 84) uint8.
-        raise NotImplementedError
+        self._states = np.zeros((self.capacity, 4, 84, 84), dtype=np.uint8)
+        self._actions = np.zeros(self.capacity, dtype=np.int64)
+        self._rewards = np.zeros(self.capacity, dtype=np.float32)
+        self._next_states = np.zeros((self.capacity, 4, 84, 84), dtype=np.uint8)
+        self._dones = np.zeros(self.capacity, dtype=np.float32)
 
     def push(
         self,
@@ -45,7 +49,14 @@ class ReplayBuffer:
         """Store one transition. Overwrites oldest entry when buffer is full."""
         # TODO: store the transition at self._pos, advance the pointer,
         # and update self._size.
-        raise NotImplementedError
+        self._states[self._pos] = state
+        self._actions[self._pos] = action
+        self._rewards[self._pos] = reward
+        self._next_states[self._pos] = next_state
+        self._dones[self._pos] = done
+
+        self._pos = (self._pos + 1) % self.capacity
+        self._size = min(self._size + 1, self.capacity)
 
     def sample(self, batch_size: int) -> tuple[torch.Tensor, ...]:
         """Return (states, actions, rewards, next_states, dones) as GPU tensors.
@@ -55,9 +66,14 @@ class ReplayBuffer:
         rewards:                float32, shape (B,)
         dones:                  float32, shape (B,)  — 1.0 if terminal, else 0.0
         """
-        # TODO: sample batch_size random indices, gather the stored transitions,
-        # convert observations from uint8 to float32 / 255.0, and move to device.
-        raise NotImplementedError
+  
+        indices = np.random.randint(0, self._size, size=batch_size)
+        states = torch.from_numpy(self._states[indices]).to(self.device, dtype=torch.float32, non_blocking=True).div_(255.0)
+        actions = torch.from_numpy(self._actions[indices]).to(self.device, non_blocking=True)
+        rewards = torch.from_numpy(self._rewards[indices]).to(self.device, non_blocking=True)
+        next_states = torch.from_numpy(self._next_states[indices]).to(self.device, dtype=torch.float32, non_blocking=True).div_(255.0)
+        dones = torch.from_numpy(self._dones[indices]).to(self.device, non_blocking=True)
+        return states, actions, rewards, next_states, dones
 
     def __len__(self) -> int:
         return self._size
