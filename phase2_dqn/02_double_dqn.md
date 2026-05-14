@@ -178,129 +178,170 @@ Work through these by hand. The goal is to understand the mechanism deeply.
 **Setup:**
 
 Your network has overestimated:
-- True Q*(s_hit_paddle, a_move_left) = 10
-- Network Q_θ(s_hit_paddle, a_move_left) = 15 (overestimated by 5)
+- True optimal value Q*(s_hit_paddle) = max_a' Q*(s_hit_paddle, a') = 10
+- Network estimate Q_θ(s_hit_paddle) = 15 (overestimated by 5)
+  - (This is the max Q-value among all actions at s_hit_paddle)
 
 **Transition sequence (moving backward in time):**
-- Time t: agent at s_setup, takes a_move, reward r=0, lands in s_hit_paddle (not terminal)
-- Time t-1: agent at s_start_sequence, takes a_setup, reward r=0, lands in s_setup (not terminal)
+- Time t: agent at s_setup, takes some action, reward r=0, lands in s_hit_paddle (not terminal)
+- Time t-1: agent at s_start_sequence, takes some action, reward r=0, lands in s_setup (not terminal)
 
-**Part A:** Using vanilla DQN with γ=0.99, compute the TD target for (s_setup, a_move).
+**Part A:** Using vanilla DQN with γ=0.99, compute the TD target for the transition into s_hit_paddle.
 
-```
-target = ?
-```
-
-**Part B:** Now compute the TD target for (s_start_sequence, a_setup), assuming Q_target(s_setup, a_move) has converged to your answer from Part A.
+The vanilla DQN TD target is: `target = r + γ × max_a' Q_target(s_hit_paddle, a')`
 
 ```
 target = ?
 ```
 
-**Part C:** By how much has the error compounded through these two steps?
+**Part B:** Now compute the TD target for the transition into s_setup, assuming Q_target(s_setup) has converged to your answer from Part A.
+
+```
+target = ?
+```
+
+**Part C:** The true value should have been Q*(s_setup) = 0 + 0.99 × 10 = 9.9. By how much has the estimate diverged from truth after two steps?
 
 ---
 
-### Exercise 2 — Double DQN vs Vanilla: Same Data
+### Exercise 2 — The Uniform Overestimation Edge Case
 
 **Setup:**
 
-True values:
-- Q*(s', a₁) = 10, Q*(s', a₂) = 8
+True optimal values at s': Q*(s', a₁)=10, Q*(s', a₂)=8
 
-**Online network (fresh):**
-- Q_online(s', a₁) = 12, Q_online(s', a₂) = 9
+Your network estimates (both actions overestimated by exactly 3):
+- Q_θ(s', a₁) = 13
+- Q_θ(s', a₂) = 11
 
-**Target network (stale):**
-- Q_target(s', a₁) = 9, Q_target(s', a₂) = 8
+γ = 0.99, r = 0.
 
-You're computing the TD target for transition: (s, a, r=0, s').
-
-**Part A:** Using vanilla DQN, what is the target?
+**Part A:** What is the vanilla DQN target?
 
 ```
 target_vanilla = ?
 ```
 
-**Part B:** Using Double DQN, what is the target?
+**Part B:** What *should* the target be (using true values)?
 
 ```
-target_double = ?
+target_true = ?
 ```
 
-**Part C:** Which is closer to truth? Why did they differ?
+**Part C:** Vanilla's target is wrong by how much? Now here's the key insight: despite this error in the *absolute value*, vanilla DQN still learns the correct *policy* (choosing a₁). Why? Under what general condition does vanilla DQN get the policy right even when values are inflated?
+
+(Hint: What matters for policy — the absolute value, or the relative ordering?)
 
 ---
 
-### Exercise 3 — When Does Vanilla Accidentally Succeed?
+### Exercise 3 — When Do Networks Disagree (and Does It Matter)?
 
-**Scenario A:**
+**Setup:**
 
-True values: Q*(s', a₁)=20, Q*(s', a₂)=15, Q*(s', a₃)=10
-Network: Q_θ(s', a₁)=25, Q_θ(s', a₂)=18, Q_θ(s', a₃)=12
+True optimal value at s': max_a' Q*(s', a') = 10
 
-**Part A:** What action does vanilla max pick? Is it optimal?
+**Two scenarios:**
 
-**Scenario B:**
+**Scenario A: Networks disagree on best action**
 
-True values: Q*(s', a₁)=10, Q*(s', a₂)=15, Q*(s', a₃)=8
-Network: Q_θ(s', a₁)=20, Q_θ(s', a₂)=12, Q_θ(s', a₃)=9
+Online network: Q_online(s', a₁) = 15, Q_online(s', a₂) = 9 ← online thinks a₁ is best
+Target network: Q_target(s', a₁) = 8, Q_target(s', a₂) = 11 ← target thinks a₂ is best
 
-**Part B:** What action does vanilla max pick? Is it optimal?
+**Scenario B: Networks agree on best action**
 
-**Part C:** Generalize. Under what *conditions* does vanilla Q-Learning pick the right action despite overestimation?
+Online network: Q_online(s', a₁) = 15, Q_online(s', a₂) = 9 ← thinks a₁ is best
+Target network: Q_target(s', a₁) = 11, Q_target(s', a₂) = 8 ← also thinks a₁ is best
 
-(Hint: Think about *relative ordering*.)
+**Question:** Compute the vanilla DQN and Double DQN targets for both scenarios (γ=0.99, r=0). In which scenario does Double DQN provide an actual benefit? Why?
+
+```
+Scenario A:
+  target_vanilla = ?
+  target_double = ?
+
+Scenario B:
+  target_vanilla = ?
+  target_double = ?
+```
+
+**Part C:** What does this tell you about when Double DQN helps vs when it's neutral?
 
 ---
 
-### Exercise 4 — Challenge: Max Q-Values
+### Exercise 4 — Can Double DQN Overestimate in the Other Direction?
 
-Suppose you train two agents: vanilla DQN and Double DQN (both with Huber loss).
+**Setup:**
 
-**Question:** Would you expect Double DQN to have lower *maximum Q-value* estimates than vanilla? Why or why not?
+You have two networks with a persistent bias:
+- Online network: consistently **underestimates** all actions by ~2
+  - Q_online(s', a₁) = 8, Q_online(s', a₂) = 6 (true values are ~10, ~8)
+- Target network: estimates fairly accurately
+  - Q_target(s', a₁) = 10, Q_target(s', a₂) = 8
+
+**Question:** Using Double DQN, could your TD target be *systematically lower* than the true value? If so, construct an example. If not, explain why the mechanism prevents it.
+
+(This isn't a trick question—answer honestly. The point is to think through the consequences of decoupling selection and evaluation.)
 
 ---
 
 ## 10. Code Tasks
 
-See [`dqn_agent.py`](dqn_agent.py).
+### Task 1 — Implement Double DQN in DQNAgent
 
-### Task 1 — Implement Double DQN
+Edit [`dqn_agent.py`](dqn_agent.py):
 
-Modify `DQNAgent.__init__` to accept an optional `use_double_q: bool = False` parameter.
+**Part A:** Add a `use_double_q: bool = False` parameter to `DQNAgent.__init__`. Store it as `self.use_double_q`.
 
-In `train_step()`, when `use_double_q=True`:
-- Use the **online network** to SELECT the best next action
-- Use the **target network** to EVALUATE that action's Q-value
-- When `use_double_q=False`, use target network for both (vanilla DQN)
+**Part B:** In the `train_step()` method, modify the line that computes `max_next_state_q`.
 
-**Hint:** Your current code computes `max_next_state_q` by taking the max of Q_target(s'). Change this to:
-1. Compute Q_online(s') to find the best action
-2. Use that action index to index into Q_target(s')
+Currently it uses the target network for both action selection and evaluation. The change: **decouple them**. When `self.use_double_q=True`, use the online network to decide which action is best, then evaluate that action using the target network. When False, keep the current behavior (target for both).
 
-This is a **3-line change** in `train_step()`.
+**Hint:** Look at how you currently gather predictions from the online network in `train_step()` — use a similar pattern to gather from the target network using an action index from the online network.
 
-### Task 2 — Train Both Variants
+---
 
-Update [`train.py`](train.py):
-1. Train an agent with `use_double_q=False` (vanilla, baseline)
-2. Train an agent with `use_double_q=True` (Double DQN)
-3. Run eval on both and compare learning curves
+### Task 2 — Run Experiments: Vanilla vs Double DQN
 
-Use the same seed and hyperparameters for both. The only difference should be this flag.
+Edit [`dqn_agent.py`](dqn_agent.py) to implement Double DQN from Task 1, then:
 
-### Task 3 — Compare Performance
+**Part A:** Verify that `train.py` can accept `--use-double-q` flag via command line. (It should already be set up.)
 
-Generate a plot showing both agents' episode rewards over time:
-- X-axis: training step
-- Y-axis: mean episode reward (smoothed, e.g., moving average)
-- Two lines: vanilla vs Double DQN
+**Part B:** Train two agents using the same seed and hyperparameters:
 
-**Questions to answer:**
-- Does Double DQN converge faster?
-- Does it reach a higher final score?
-- Is training more stable (fewer fluctuations)?
+```bash
+# Run 1: Vanilla DQN (baseline)
+python3 -m phase2_dqn.train
+
+# Run 2: Double DQN (with the flag)
+python3 -m phase2_dqn.train --use-double-q
+```
+
+Each run will automatically save episode rewards to:
+- `checkpoints/results_vanilla.json` (vanilla DQN)
+- `checkpoints/results_double_dqn.json` (Double DQN)
+
+---
+
+### Task 3 — Compare Learning Curves
+
+Write a script (`phase2_dqn/plot_comparison.py` or a notebook) that:
+
+1. **Loads episode rewards** from the JSON files created by Task 2:
+   - `checkpoints/results_vanilla.json`
+   - `checkpoints/results_double_dqn.json`
+
+2. **Plots both on the same graph:**
+   - X-axis: episode number
+   - Y-axis: episode reward (you can plot raw rewards or 10-episode moving average)
+   - Two lines: vanilla vs Double DQN
+
+3. **Computes and reports summary statistics:**
+   - Mean reward in episodes 1–25
+   - Mean reward in episodes 26–50 (if you have that many)
+   - Max episode reward achieved by each variant
+   - Does one variant reach higher rewards faster?
+
+**Interpretation:** Compare the curves. Do they differ meaningfully, or are they similar? This tells you whether Double DQN's decoupling helps on this problem at this scale.
 
 ---
 
