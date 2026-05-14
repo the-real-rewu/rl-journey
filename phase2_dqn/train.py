@@ -1,15 +1,19 @@
 """DQN training loop for Atari Breakout.
 
 Run from repo root:
-    python3 -m phase2_dqn.train
+    python3 -m phase2_dqn.train [--use-double-q]
 
-All experiments are driven by CONFIG below — change one value, re-run.
+All experiments are driven by CONFIG below.
+Command-line arguments override CONFIG values (e.g., --use-double-q to enable Double DQN).
+Results are saved to results_*.json based on the experiment variant.
 """
 
 from __future__ import annotations
 import sys
 import os
 import time
+import json
+import argparse
 import torch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -26,9 +30,9 @@ from phase2_dqn.dqn_agent import DQNAgent
 #   4. Set epsilon_final=0.0. Does the agent still explore enough to learn?
 CONFIG = {
     "env_id":              "ALE/Breakout-v5",
-    # 5M steps: DQN on Atari starts showing real skill around 3–5M.
-    # The first 2M run was cut short and used MSE loss (see below).
-    "total_steps":         5_000_000,
+    # For learning experiments: 100k steps is enough to see basic learning.
+    # For production: set to 5_000_000 (DQN shows real skill around 3–5M).
+    "total_steps":         100_000,
     "buffer_capacity":     100_000,
     "batch_size":          1024,
     "learning_starts":     10_000,   # steps before first gradient update
@@ -48,16 +52,24 @@ CONFIG = {
     "save_freq":           250_000,  # checkpoint every N steps
     "checkpoint_dir":      "checkpoints",
     "seed":                0,
+    "use_double_q":        False,    # enable Double DQN (override with --use-double-q)
 }
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 def main():
-    cfg = CONFIG
+    parser = argparse.ArgumentParser(description="DQN training on Atari Breakout")
+    parser.add_argument("--use-double-q", action="store_true", help="Enable Double DQN (default: vanilla DQN)")
+    args = parser.parse_args()
+
+    cfg = CONFIG.copy()
+    cfg["use_double_q"] = args.use_double_q
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Training on: {device}")
     if device.type == "cuda":
         print(f"GPU: {torch.cuda.get_device_name(0)}")
+    print(f"Double DQN: {cfg['use_double_q']}")
 
     torch.manual_seed(cfg["seed"])
     if device.type == "cuda":
@@ -76,6 +88,7 @@ def main():
         epsilon_final=cfg["epsilon_final"],
         epsilon_decay_steps=cfg["epsilon_decay_steps"],
         target_update_freq=cfg["target_update_freq"],
+        use_double_q=cfg["use_double_q"],
     )
 
     os.makedirs(cfg["checkpoint_dir"], exist_ok=True)
@@ -127,6 +140,19 @@ def main():
 
     env.close()
     print("Training complete.")
+
+    # Save episode rewards for analysis
+    variant_name = "double_dqn" if cfg["use_double_q"] else "vanilla"
+    results_file = os.path.join(cfg["checkpoint_dir"], f"results_{variant_name}.json")
+    results = {
+        "variant": variant_name,
+        "episode_rewards": episode_rewards,
+        "total_steps": cfg["total_steps"],
+        "use_double_q": cfg["use_double_q"],
+    }
+    with open(results_file, "w") as f:
+        json.dump(results, f)
+    print(f"Results saved to: {results_file}")
 
 
 if __name__ == "__main__":
