@@ -76,23 +76,60 @@ The variance-reduction framing — same idea, statistician's language: instead o
 
 This is *why* the architectural prior pays off: it routes gradient signal to the right place. The "most timesteps the action doesn't matter" claim translates into "the shared baseline `V` is doing most of the work, so accelerating its learning accelerates the whole thing."
 
-### 1.4 Why we have to anchor `A` at all
+### 1.4 Why we have to anchor — and the cleanest way to think about it
 
 The decomposition `Q(s, a) = V(s) + A(s, a)` is **underdetermined**. Add any constant `c` to `V`, subtract `c` from every `A` — same `Q`. Infinite valid `(V, A)` decompositions produce the same function.
 
-This sounds harmless. It isn't. Here's the worst case: the network learns `V(s) = 0` everywhere, and the A-head absorbs all the Q-value information. This is a valid solution to the loss — `Q(s, a) = 0 + Q(s, a)` is consistent. But the V-head has learned nothing useful; the A-head is doing exactly the same job as a vanilla DQN output layer; the gradient-flow benefit from Section 1.3 is gone. The architectural prior collapsed back to vanilla DQN with extra parameters.
+This sounds harmless. It isn't. Here's the worst case: the network learns `V(s) = 0` everywhere and the A-head absorbs all the Q-value information. This is a valid solution to the loss — `Q(s, a) = 0 + Q(s, a)` is consistent. But the V-head has learned nothing useful; the A-head is doing exactly the same job as a vanilla DQN output layer; the gradient-flow benefit from Section 1.3 is gone. Dueling collapsed back to vanilla DQN with extra parameters.
 
-Nothing in the loss tells the network *which* split to pick. The two heads can drift freely as long as their sum is correct. We have to add a constraint that **forces** `V` to mean "state value" and `A` to mean "action-relative correction." That constraint is what anchoring does.
+So we need a constraint forcing the split into a specific interpretation. There are several reasonable choices:
 
-Three reasonable anchorings, all of which make the split well-defined:
+| Anchoring          | What V means                       |
+|--------------------|------------------------------------|
+| `mean_a A = 0`     | `V(s) = mean_a Q(s, a)`            |
+| `A at argmax = 0`  | `V(s) = max_a Q(s, a)`             |
+| `A at action 0 = 0`| `V(s) = Q(s, a₀)`                  |
+
+The mean anchoring is the cleanest both to motivate and to optimize. Section 1.5 covers the optimization side (loss-landscape geometry). For the motivation, flip the question — instead of "anchor A," **anchor V**:
+
+Declare what V *means*: `V(s) := mean_a Q(s, a)`. V is the per-state baseline, averaged across actions. Given that definition, A is forced:
 
 ```
-A must be 0 at argmax_a  →  V(s) = max_a Q(s, a)        ← "value of acting optimally"
-A must be 0 on average   →  V(s) = mean_a Q(s, a)       ← "average value over actions"
-A must be 0 at action 0  →  V(s) = Q(s, a₀)             ← "value of taking action 0"
+A(s, a) := Q(s, a) − V(s) = Q(s, a) − mean_a' Q(s, a')
+
+⇒ mean_a A(s, a) = mean_a Q − mean_a Q = 0       (automatically)
 ```
 
-All three force `V` to learn a specific, meaningful quantity. All three make `(V, A)` unique. The choice between them is about which interpretation is useful and — more importantly — which has a friendly loss landscape.
+Defining V as the mean *forces* A to have zero mean. Same equation as "anchor A to have zero mean," derived from the other end. But the *intent* is clearer this way: V is the baseline of being in this state; A is how much each action deviates from that baseline. The "anchor" isn't a mathematical convenience — it's the definition of what V and A are *supposed to mean*.
+
+#### What the form `V + (A − mean A)` actually enforces
+
+The V-head and A-head produce **independent outputs**. Nothing in the loss tells them which split to pick; nothing prevents them from drifting toward "V=0, A absorbs everything." We can't enforce `V = mean Q` by hoping — we have to bake it into how Q is computed.
+
+That's what the `− mean_a A` term does. Take the mean of both sides of `Q = V + (A − mean A)`:
+
+```
+mean_a Q(s, a) = V(s) + mean_a [A(s, a) − mean_a' A(s, a')]
+              = V(s) + (mean A − mean A)
+              = V(s)
+```
+
+Whatever the V-head outputs, the V it ends up representing is `mean_a Q(s, a)` — by construction, regardless of what the A-head does. The mean-subtraction isn't algebraic cleanup; it's a structural constraint on the function class.
+
+#### Bonus: mean-subtraction also spreads A's gradient
+
+Section 1.3 showed that V updates on every step under Dueling. The mean-subtraction term adds a smaller but real second effect: **A's parameters for *every* action also receive gradient on every step**, not just the sampled action.
+
+Differentiate `Q(s, a) = V(s) + A(s, a) − (1/N) · Σ_{a'} A(s, a')` w.r.t. each A-output:
+
+```
+∂Q(s, a) / ∂A(s, a)   = 1 − 1/N         (sampled action: most of the signal)
+∂Q(s, a) / ∂A(s, a')  =   − 1/N         (unsampled action a': small reverse signal)
+```
+
+When you backprop the loss from a sampled action `a`, gradient flows into every A-output cell — magnitude `(1 − 1/N)` for the action you took, magnitude `1/N` (opposite sign) for the actions you didn't.
+
+In vanilla DQN's last layer, only the sampled action's row of output weights receives gradient — and Section 1.1's "wasted capacity" complaint hinges on that fact. Mean-subtraction partially fixes that for the A-head too. The effect is smaller than V's full-strength update (`1/N` instead of `1`), but it's real and points the same direction: every gradient step propagates information about the sampled transition into all action heads, not just the one that was sampled.
 
 ### 1.5 Why the mean and not the max
 
