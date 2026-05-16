@@ -1,10 +1,10 @@
 """DQN training loop for Atari Breakout.
 
 Run from repo root:
-    python3 -m phase2_dqn.train [--use-double-q]
+    python3 -m phase2_dqn.train [--use-double-dqn]
 
 All experiments are driven by CONFIG below.
-Command-line arguments override CONFIG values (e.g., --use-double-q to enable Double DQN).
+Command-line arguments override CONFIG values (e.g., --use-double-dqn to enable Double DQN).
 Results are saved to results_*.json based on the experiment variant.
 """
 
@@ -30,9 +30,9 @@ from phase2_dqn.dqn_agent import DQNAgent
 #   4. Set epsilon_final=0.0. Does the agent still explore enough to learn?
 CONFIG = {
     "env_id":              "ALE/Breakout-v5",
-    # For learning experiments: 100k steps is enough to see basic learning.
-    # For production: set to 5_000_000 (DQN shows real skill around 3–5M).
-    "total_steps":         100_000,
+    # 5M env steps — DQN paper scale. Real skill emerges, bias curves clearly
+    # diverge between vanilla and Double DQN. Expect 6–14 hours per run on GPU.
+    "total_steps":         5_000_000,
     "buffer_capacity":     100_000,
     "batch_size":          1024,
     "learning_starts":     10_000,   # steps before first gradient update
@@ -45,31 +45,38 @@ CONFIG = {
     "lr":                  1e-4,
     "epsilon_start":       1.0,
     "epsilon_final":       0.1,
-    # Epsilon decays over 500k gradient steps ≈ 2M env steps (at train_freq=4).
-    # Fully greedy (ε=0.1) for the last 3M steps.
-    "epsilon_decay_steps": 500_000,
+    # Decay is in GRADIENT steps. Total gradient steps for 5M env steps =
+    # (5_000_000 - 10_000) / 4 ≈ 1.25M. Decay over first 250k gradient steps
+    # = ~1M env steps (DQN-paper standard). Remaining ~80% of training greedy.
+    "epsilon_decay_steps": 250_000,
     "log_freq":            10,       # log every N episodes
-    "save_freq":           250_000,  # checkpoint every N steps
+    "save_freq":           500_000,  # checkpoint every N env steps
+    # Q-value bias tracking: every N env steps, compute mean max_a Q_online(s,a)
+    # over a fixed eval state set. Vanilla's curve should drift higher than
+    # Double DQN's — direct evidence of overestimation bias, visible long
+    # before the reward gap shows up.
+    "q_log_freq":          10_000,
+    "q_eval_size":         512,      # states held fixed across training for Q tracking
     "checkpoint_dir":      "checkpoints",
     "seed":                0,
-    "use_double_q":        False,    # enable Double DQN (override with --use-double-q)
+    "use_double_dqn":        False,    # enable Double DQN (override with --use-double-dqn)
 }
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 def main():
     parser = argparse.ArgumentParser(description="DQN training on Atari Breakout")
-    parser.add_argument("--use-double-q", action="store_true", help="Enable Double DQN (default: vanilla DQN)")
+    parser.add_argument("--use-double-dqn", action="store_true", help="Enable Double DQN (default: vanilla DQN)")
     args = parser.parse_args()
 
     cfg = CONFIG.copy()
-    cfg["use_double_q"] = args.use_double_q
+    cfg["use_double_dqn"] = args.use_double_dqn
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Training on: {device}")
     if device.type == "cuda":
         print(f"GPU: {torch.cuda.get_device_name(0)}")
-    print(f"Double DQN: {cfg['use_double_q']}")
+    print(f"Double DQN: {cfg['use_double_dqn']}")
 
     torch.manual_seed(cfg["seed"])
     if device.type == "cuda":
@@ -88,7 +95,7 @@ def main():
         epsilon_final=cfg["epsilon_final"],
         epsilon_decay_steps=cfg["epsilon_decay_steps"],
         target_update_freq=cfg["target_update_freq"],
-        use_double_q=cfg["use_double_q"],
+        use_double_dqn=cfg["use_double_dqn"],
     )
 
     os.makedirs(cfg["checkpoint_dir"], exist_ok=True)
@@ -98,6 +105,8 @@ def main():
     episode_count = 0
     episode_rewards = []
     recent_losses = []
+    q_log = []                # list of (env_step, mean_max_q) tuples
+    eval_states = None        # fixed state set, captured once buffer is warm
     t_start = time.time()
 
     for step in range(1, cfg["total_steps"] + 1):
@@ -133,8 +142,20 @@ def main():
                 loss = agent.train_step(batch)
                 recent_losses.append(loss)
 
+        # Capture a fixed eval state set once the buffer has enough samples.
+        # Holding these constant across training lets us track how Q-estimates
+        # evolve on the *same* states — that's where overestimation shows up.
+        if eval_states is None and len(buffer) >= cfg["q_eval_size"]:
+            eval_states = buffer.sample(cfg["q_eval_size"])[0].detach()
+
+        if eval_states is not None and step % cfg["q_log_freq"] == 0:
+            with torch.no_grad():
+                mean_max_q = agent.online(eval_states).max(dim=1)[0].mean().item()
+            q_log.append((step, mean_max_q))
+
         if step % cfg["save_freq"] == 0:
-            path = os.path.join(cfg["checkpoint_dir"], f"dqn_step_{step}.pt")
+            variant_tag = "double_dqn" if cfg["use_double_dqn"] else "vanilla"
+            path = os.path.join(cfg["checkpoint_dir"], f"dqn_{variant_tag}_step_{step}.pt")
             agent.save(path)
             print(f"  → checkpoint saved: {path}")
 
@@ -142,13 +163,14 @@ def main():
     print("Training complete.")
 
     # Save episode rewards for analysis
-    variant_name = "double_dqn" if cfg["use_double_q"] else "vanilla"
+    variant_name = "double_dqn" if cfg["use_double_dqn"] else "vanilla"
     results_file = os.path.join(cfg["checkpoint_dir"], f"results_{variant_name}.json")
     results = {
         "variant": variant_name,
         "episode_rewards": episode_rewards,
+        "q_log": q_log,
         "total_steps": cfg["total_steps"],
-        "use_double_q": cfg["use_double_q"],
+        "use_double_dqn": cfg["use_double_dqn"],
     }
     with open(results_file, "w") as f:
         json.dump(results, f)
