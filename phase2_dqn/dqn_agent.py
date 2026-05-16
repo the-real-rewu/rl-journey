@@ -52,6 +52,7 @@ class DQNAgent:
         epsilon_final: float = 0.1,
         epsilon_decay_steps: int = 1_000_000,
         target_update_freq: int = 1000,
+        use_double_dqn: bool = False,
     ):
         self.num_actions = num_actions
         self.device = device
@@ -60,6 +61,7 @@ class DQNAgent:
         self.epsilon_final = epsilon_final
         self.epsilon_decay_steps = epsilon_decay_steps
         self.target_update_freq = target_update_freq
+        self.use_double_dqn = use_double_dqn
         self.steps = 0
 
         self.online = DQNNetwork(num_actions).to(device)
@@ -91,14 +93,19 @@ class DQNAgent:
         See section 6 of the theory doc for the full update equation.
         """
         states, actions, rewards, next_states, dones = batch
-
+        
         with torch.no_grad():
-            max_next_state_q = self.target(next_states).max(dim=1)[0]
+            if self.use_double_dqn:
+                best_actions = self.online(next_states).argmax(dim=1, keepdim=True)
+                max_next_state_q = self.target(next_states).gather(1, best_actions).squeeze(1)
+            else:
+                max_next_state_q = self.target(next_states).max(dim=1)[0]
+
         td_targets = rewards + self.gamma * max_next_state_q * (1 - dones)
-        current_predictions = self.online(states).gather(1, actions.long().unsqueeze(1)).squeeze(1)
+        online_predictions = self.online(states).gather(1, actions.long().unsqueeze(1)).squeeze(1)
         # Huber loss (smooth L1): caps gradient magnitude for large TD errors,
         # preventing the Q-value overestimation spiral that MSE causes.
-        loss = F.smooth_l1_loss(current_predictions, td_targets)
+        loss = F.smooth_l1_loss(online_predictions, td_targets)
 
         self.optimizer.zero_grad()
         loss.backward()
