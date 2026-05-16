@@ -54,26 +54,71 @@ Dueling DQN bakes this split into the network architecture:
 
 The output shape is still `(batch, num_actions)` — the only changed component is how the head computes it.
 
-### 1.3 Why subtract the mean?
+### 1.3 Why this actually helps — the gradient-flow mechanism
 
-`Q(s, a) = V(s) + A(s, a)` is **unidentifiable** as written. You can add any constant `c` to `V` and subtract `c` from every `A`, and `Q` is unchanged. The network would have to choose, somehow, what fraction of `Q` to put in `V` versus `A` — and there's no signal telling it.
+"Most of the time the action doesn't matter" is the *motivation*. The *mechanism* is about how gradient signal reaches the shared baseline.
 
-So we anchor `A` by forcing it to be zero on average. Two natural choices:
+In vanilla DQN, the output layer produces `num_actions` numbers that are **independently parameterized**. The weights that produce the output for action `a₁` are separate from the weights that produce the output for action `a₂`. When you train on a transition `(s, a, r, s')`, the loss is `huber(target − Q(s, a))`. Gradient flows back into the weights that produced the output for **the action that was actually taken**. The output cells for the other actions appeared nowhere in the loss for this step — they get zero gradient signal.
+
+So if `V(s) = 50` and you'd ideally want all three of `Q(s, a₁)`, `Q(s, a₂)`, `Q(s, a₃)` to learn the value `~50`, vanilla DQN has to discover "they all equal 50" by independently regressing each one — only one of the three gets updated per training step touching state `s`. Three parallel regressions, each updated `1/num_actions` of the time, all trying to converge to the same target.
+
+In Dueling, `V(s)` sits on the gradient path of **every** action's output:
 
 ```
-Q(s, a) = V(s) + A(s, a) − max_a' A(s, a')     ← max-subtraction
-Q(s, a) = V(s) + A(s, a) − mean_a A(s, a)      ← mean-subtraction
+Q(s, a) = V(s) + A(s, a) − mean_a' A(s, a')
+       └────┘   └─────┘    └──────────────┘
+       updates  updates    updates (touches A for ALL actions)
 ```
 
-Both make the decomposition unique. Both preserve `argmax_a Q(s, a)`. The Wang et al. (2016) paper picks **mean-subtraction**, and the reason isn't identifiability — it's gradient stability. Exercise 1 walks you through this.
+When you backpropagate `huber(target − Q(s, a))`, the chain rule sends gradient into `V(s)` regardless of which action was taken. The shared baseline gets updated on **every** transition touching `s`, not just transitions where action `a` happened to be sampled. The part of the value function that's shared across actions learns `~num_actions ×` faster.
 
-### 1.4 Why this actually helps
+The variance-reduction framing — same idea, statistician's language: instead of regressing `Q(s, a)` directly (typical scale 0–100), you regress the bulk `V(s)` and a small correction `A(s, a)` separately. The correction has a much smaller dynamic range, so its estimator has lower variance for the same number of samples. **Exactly the baseline-subtraction argument from REINFORCE** — Phase 3 will redo this in the policy-gradient setting and reach the same conclusion.
 
-The architectural prior says: *most of `Q(s, a)`'s variance across actions is shared between actions* (that's `V`), and *only a small per-action correction is needed* (that's `A`). When this prior matches the environment — Breakout being a great example — the network learns faster because it doesn't have to redundantly encode `V(s)` `num_actions` times.
+This is *why* the architectural prior pays off: it routes gradient signal to the right place. The "most timesteps the action doesn't matter" claim translates into "the shared baseline `V` is doing most of the work, so accelerating its learning accelerates the whole thing."
 
-When the prior doesn't match — every action genuinely has a very different value — Dueling is roughly neutral. Not better, not catastrophically worse. The mean-subtraction couples the heads enough that the network can still fall back to encoding everything in `A` if it wants.
+### 1.4 Why we have to anchor `A` at all
 
-### 1.5 Bridge to Phase 3
+The decomposition `Q(s, a) = V(s) + A(s, a)` is **underdetermined**. Add any constant `c` to `V`, subtract `c` from every `A` — same `Q`. Infinite valid `(V, A)` decompositions produce the same function.
+
+This sounds harmless. It isn't. Here's the worst case: the network learns `V(s) = 0` everywhere, and the A-head absorbs all the Q-value information. This is a valid solution to the loss — `Q(s, a) = 0 + Q(s, a)` is consistent. But the V-head has learned nothing useful; the A-head is doing exactly the same job as a vanilla DQN output layer; the gradient-flow benefit from Section 1.3 is gone. The architectural prior collapsed back to vanilla DQN with extra parameters.
+
+Nothing in the loss tells the network *which* split to pick. The two heads can drift freely as long as their sum is correct. We have to add a constraint that **forces** `V` to mean "state value" and `A` to mean "action-relative correction." That constraint is what anchoring does.
+
+Three reasonable anchorings, all of which make the split well-defined:
+
+```
+A must be 0 at argmax_a  →  V(s) = max_a Q(s, a)        ← "value of acting optimally"
+A must be 0 on average   →  V(s) = mean_a Q(s, a)       ← "average value over actions"
+A must be 0 at action 0  →  V(s) = Q(s, a₀)             ← "value of taking action 0"
+```
+
+All three force `V` to learn a specific, meaningful quantity. All three make `(V, A)` unique. The choice between them is about which interpretation is useful and — more importantly — which has a friendly loss landscape.
+
+### 1.5 Why the mean and not the max
+
+This is Exercise 1, but worth tracing here so the choice doesn't feel arbitrary.
+
+Both mean- and max-subtraction make `Q` identifiable and preserve `argmax_a Q(s, a)`. The argument for mean is gradient stability. Concretely:
+
+Suppose your 2-action network is mid-training. Current estimates: `A(a₁) = +0.1`, `A(a₂) = −0.1`. The argmax is `a₁`.
+
+**Under max-subtraction**, `V(s) = max_a Q(s, a) = Q(s, a₁)`. `V`'s interpretation is "the Q-value of action 1."
+
+One small gradient step later, suppose the new estimates are `A(a₁) = −0.05`, `A(a₂) = +0.05`. The argmax just **flipped to `a₂`**. Now `V(s) = Q(s, a₂)`. `V`'s interpretation discontinuously jumped from "Q of action 1" to "Q of action 2." Viewed as a function `V(θ)` of network parameters, it has a **kink** at exactly the parameter values where the argmax flips. The derivative is discontinuous there.
+
+**Under mean-subtraction**, `V(s) = mean_a Q(s, a) = (Q(a₁) + Q(a₂)) / 2`, always. The argmax flip changes nothing about how `V` is computed. `V(θ)` is a smooth function across the entire parameter space.
+
+Smooth gradients → SGD behaves predictably. Kinks → SGD bounces and trains badly near states where multiple actions have similar values. And those near-tie states are *exactly where you most want clean gradient signal*, because they're the states where the policy decision is most sensitive to estimation error.
+
+So mean-subtraction isn't more theoretically correct than max-subtraction — both define valid Q-functions over the same function class. It's **numerically friendlier to optimize**. Same flavor of argument as Huber-over-MSE: both work in principle, one has a dramatically better loss landscape.
+
+### 1.6 When the prior matches and when it doesn't
+
+The architectural prior says: *most of `Q(s, a)`'s variance across actions is shared between actions* (that's `V`), and *only a small per-action correction is needed* (that's `A`). When this prior matches the environment — Breakout being a great example — the gradient-flow advantage from Section 1.3 translates directly into faster learning.
+
+When the prior doesn't match — every action genuinely has a very different value at every state — Dueling is roughly neutral. Not better, not catastrophically worse. The mean-anchoring still couples the heads, so the network can fall back to encoding the bulk of the variance in `A` if it needs to. You get the parameter overhead of two heads without the gradient-flow speedup.
+
+### 1.7 Bridge to Phase 3
 
 `V(s)` and `A(s, a)` are exactly the quantities that show up in actor-critic methods. Phase 3 starts with REINFORCE, then adds a "baseline" `V(s)` to reduce variance — at which point you'll find yourself computing `A(s, a) = Q(s, a) − V(s)` and calling it the *advantage*. Same equation, same intuition. You're meeting it here first as an architectural choice; you'll meet it next as a variance-reduction technique.
 
@@ -81,11 +126,20 @@ When the prior doesn't match — every action genuinely has a very different val
 
 ## 2. Prioritized Experience Replay — Better Samples
 
-### 2.1 The problem: uniform sampling is dumb
+### 2.1 The problem: uniform sampling wastes gradient signal
 
-The vanilla replay buffer samples transitions uniformly. So a transition where the network is already perfectly correct (`δ = Q_predicted − target = 0`) gets sampled just as often as a transition where the network is wildly wrong (`δ = 5`).
+The vanilla replay buffer samples transitions uniformly. A transition where the network is already perfectly correct (`δ = Q_predicted − target = 0`) gets sampled just as often as a transition where the network is wildly wrong (`δ = 5`).
 
-Gradient descent on the zero-error transition produces zero gradient. It contributes nothing to learning. We are spending compute on it.
+The mechanism this wastes is gradient magnitude. The gradient of the Huber loss with respect to network parameters is:
+
+```
+∇_θ huber(δ) ≈ δ · ∇_θ Q_θ(s, a)        (for |δ| < 1, the quadratic regime)
+∇_θ huber(δ) ≈ sign(δ) · ∇_θ Q_θ(s, a)  (for |δ| ≥ 1, the linear regime)
+```
+
+A batch slot occupied by a `δ = 0` transition contributes essentially zero gradient. The optimizer step is *as if that slot weren't in the batch at all*. Uniform sampling fills the batch with whatever's in the buffer, regardless of how much gradient each transition will produce. With a buffer of 100k transitions and a batch of 1024, on Breakout most of those 1024 slots are spent on transitions the network has already correctly fit — pure compute waste.
+
+PER's pitch: spend each batch slot on a transition that will actually move the parameters.
 
 ### 2.2 The fix: sample with priority proportional to TD-error magnitude
 
@@ -107,44 +161,75 @@ P(i) = p_i / sum_j p_j
 
 The Schaul et al. (2016) paper recommends `α ≈ 0.6`.
 
-### 2.3 But now sampling is biased
+### 2.3 But now sampling is biased — and IS weights fix it
 
-Uniform sampling produces an *unbiased* estimate of the expected gradient over the buffer. Priority sampling does not — you're systematically overweighting high-error transitions. Gradient descent on a biased sample distribution will converge to the wrong minimum.
+The vanilla DQN loss is the *uniform-sample expectation*:
 
-The fix is standard importance sampling. Each sampled transition gets an importance-sampling (IS) weight:
+```
+L(θ) = (1/N) · Σ_i huber(δ_i)        ← what we actually want to minimize
+```
+
+When you sample uniformly with `1/N` probability, the empirical average over a batch is an unbiased estimate of this. When you sample with priority `P(i)`, the empirical average estimates a **different** quantity:
+
+```
+E_{i ~ P}[huber(δ_i)] = Σ_i P(i) · huber(δ_i)        ← weighted, not uniform
+```
+
+Gradient descent on this biased estimate converges to a *different minimum* — the one that fits the high-priority transitions best, not the buffer as a whole.
+
+The fix is standard importance sampling. For any sample drawn with probability `P(i)`, reweight the loss by `1/(N · P(i))`:
+
+```
+E_{i ~ P}[ (1/(N·P(i))) · huber(δ_i) ] = Σ_i P(i) · (1/(N·P(i))) · huber(δ_i)
+                                       = (1/N) · Σ_i huber(δ_i)        ← uniform again
+```
+
+The reweighting algebraically cancels the priority weighting in expectation. We've recovered the uniform-sample gradient while only spending compute on high-priority transitions.
+
+In practice, the IS weight is raised to a power `β ∈ [0, 1]`:
 
 ```
 w_i = (1 / (N · P(i)))^β
 ```
 
-- `N` — buffer size
-- `β ∈ [0, 1]` — how much to correct for the bias
+`β = 1` gives the fully unbiased reweighting derived above. `β = 0` gives `w_i = 1` (no correction; you minimize the biased objective). Intermediate `β` is a partial correction.
 
-The loss for sample `i` becomes `w_i · huber(δ_i)` instead of just `huber(δ_i)`. The gradient estimate is now unbiased w.r.t. the uniform-sampling gradient — but the *variance* has gone up, because we're using a biased sampler in the first place.
+Why would you ever choose `β < 1`? **Variance.** Rare transitions (low `P(i)`) get huge IS weights `(1/(N·P(i)))^1`. A single rare sample with a large weight can dominate the batch gradient — high variance per gradient step, even though the expectation is unbiased. Annealing `β` from low to high trades early-training variance reduction for late-training unbiasedness. Section 2.4 makes this concrete.
 
-For numerical stability, the IS weights are normalized so the largest weight in a batch is 1.
+For numerical stability, the IS weights in a batch are normalized so the largest weight equals 1. This rescales the loss but doesn't change the gradient *direction* — and gradient direction is the only thing the optimizer cares about.
 
-### 2.4 Why anneal β from 0.4 to 1.0?
+### 2.4 Why anneal β from 0.4 to 1.0
 
-This is one of the subtler PER design choices. Early in training, `β` is small (~0.4), meaning you're *only partially correcting* the bias. Late in training, `β = 1.0`, meaning you're fully unbiased.
+The bias-variance trade from Section 2.3 plays out differently across training:
 
-The justification is in Exercise 4. The short version: early in training, the network is far from optimal anyway, and the biased gradients from PER actually help by directing compute toward the high-error transitions you most need to fix. Late in training, the policy is near-optimal and you need clean unbiased gradients to nail down the last mile. The annealing reflects "what kind of mistake hurts more right now."
+**Early training.** The network is far from optimal. TD targets are themselves noisy and biased (the bootstrap term is wrong). The gradient signal you're trying to estimate is itself an approximation. Adding *more* variance from full IS correction (`β = 1`, with its huge weights on rare samples) on top of an already-noisy gradient slows everything down. Some sampling bias toward high-error transitions is actually *aligned* with where you want to push the network — toward the transitions it gets most wrong. So early on, low `β` ≈ "trust the priority signal, don't over-correct."
+
+**Late training.** The policy is near-optimal, TD targets are accurate, and the remaining job is to converge the last mile of value estimates. Now the residual sampling bias actually matters — converging to the priority-weighted minimum instead of the uniform minimum is the difference between "Q-values that are correct" and "Q-values that are correct *on high-error transitions and wrong elsewhere*." Full IS correction (`β = 1`) becomes necessary, and the variance cost is acceptable because the gradient signal is otherwise stable.
+
+The linear anneal from `β=0.4` (paper default) to `β=1.0` reflects this: shift the bias-variance trade from "variance dominates" to "bias dominates" as training progresses. Exercise 4 walks through the failure modes of fixing `β` at either endpoint.
 
 ### 2.5 The role of ε
 
 The `ε` in `p_i = (|δ_i| + ε)^α` looks like a numerical hygiene constant. It's not. It's about **coverage**. Without it, a transition whose current TD-error happens to be zero gets priority `0` — and is **never sampled again**, no matter how stale that "zero" estimate becomes. The constant `ε` keeps a small but nonzero probability of revisiting every transition, so the buffer can catch silent drift. Exercise 6 makes this concrete.
 
-### 2.6 Stale priorities
+### 2.6 Stale priorities — PER as a tracking problem
 
-A transition's priority reflects its TD-error *at the moment its priority was last updated*. After that, the network keeps training, every parameter shifts a little, and the transition's actual TD-error drifts — but its stored priority doesn't update until it's resampled.
+A transition's stored priority reflects its TD-error *at the moment its priority was last updated*. Between updates, every gradient step changes the network's parameters, which changes the Q-value the network would predict for that transition right now, which changes what the transition's *real* TD-error would be if we recomputed it.
 
-This means PER is a **tracking problem**, not just a sampling problem: the priorities you're sampling from are always slightly out of date. Exercise 5 explores when this stops being a small effect.
+But we don't recompute it. The priority just sits there, stale, until the transition is sampled again. The mechanism is asymmetric in a way that matters:
+
+- A transition stored with high priority gets sampled frequently → its priority is refreshed frequently → staleness is small.
+- A transition stored with low priority gets sampled rarely → its priority is refreshed rarely → staleness can grow arbitrarily large.
+
+So PER is biased toward keeping its own previous classification correct. A transition that becomes high-error after being mis-classified as low-error will *stay* mis-classified for many gradient steps before it's resampled. Exercise 5 explores how large that gap can get and what sampling pattern produces the worst staleness.
+
+The fundamental compromise: tracking every transition's current TD-error in real-time would require a forward pass on the entire buffer every gradient step — completely impractical at 100k transitions. PER's whole approach is "accept stale priorities; the resampling cycle catches up eventually." This is *why* the `ε` coverage floor from Section 2.5 matters so much — without it, transitions that drift downward in priority can become permanently unreachable, and the resampling cycle never catches them.
 
 ---
 
 ## 3. N-step Returns — Better Targets
 
-### 3.1 1-step bootstrap is slow
+### 3.1 1-step bootstrap is slow — the chain-depth mechanism
 
 The vanilla DQN target uses a single environment step plus a bootstrap:
 
@@ -152,7 +237,23 @@ The vanilla DQN target uses a single environment step plus a bootstrap:
 target = r_t + γ · max_a Q_target(s_{t+1}, a)
 ```
 
-If a reward is earned at time `t+50`, the only way for that reward to propagate to `Q(s_t, a_t)` is to be relayed through 50 separate gradient updates — each of which slightly improves `Q(s_{t+k})`, which slightly improves `Q(s_{t+k-1})`, and so on. This is **slow**. In Breakout, where the reward is sparse-ish (you only score on brick contact), waiting for credit to crawl backward step-by-step burns sample efficiency.
+Notice what this update can and cannot do. For the transition `(s_t, a_t, r_t, s_{t+1})`, it nudges `Q(s_t, a_t)` toward `r_t + γ · max_a Q_target(s_{t+1}, a)`. If `r_t = 0` and `Q_target(s_{t+1}, ·) = 0` (because the network hasn't yet learned anything about `s_{t+1}`), the target is `0`. So this transition contributes no signal.
+
+Now imagine a Breakout episode where the reward is earned at time `t+50` (a brick is hit). For that reward to influence `Q(s_t, a_t)`, the credit has to propagate through the chain of bootstrapping targets:
+
+```
+gradient round 1:  Q(s_{t+49})  gets nudged toward  r_{t+49}              (real reward, ≠ 0)
+gradient round 2:  Q(s_{t+48})  gets nudged toward  γ · Q(s_{t+49})       (now ≠ 0)
+gradient round 3:  Q(s_{t+47})  gets nudged toward  γ · Q(s_{t+48})
+...
+gradient round 50: Q(s_t)       gets nudged toward  γ · Q(s_{t+1})
+```
+
+Each round of propagation requires that the transition for the *previous* step has been sampled from the buffer and its Q-value already updated. Reward at `t+50` needs **50 sequential rounds of gradient updates** to reach `Q(s_t)`. In practice these rounds overlap (different transitions are sampled in parallel from the buffer), but the dependency chain is real: information moves one bootstrap-link per gradient update on the corresponding transition.
+
+This is the "credit assignment depth" — how many sequential bootstrap-hops separate a reward from a target state. 1-step DQN sets this depth equal to the temporal distance. With sparse rewards on long horizons, that's painfully slow.
+
+N-step shortens the chain by `n`. With `n = 3`, reward at `t+50` needs `~50/3 = 17` rounds of propagation instead of `50`. Same sample efficiency improvement that motivated TD(λ) and eligibility traces in Phase 1.3 — now in the deep-RL setting.
 
 ### 3.2 The n-step target
 
@@ -188,19 +289,21 @@ The n-step accumulator has to be careful at episode termination. If a terminal s
 The headline claim: **Dueling + PER + n-step + Double DQN all stack without interfering.** Each improvement modifies a *different* part of the algorithm:
 
 ```
-┌─────────────────┬──────────────────────────────────────────┐
-│ Improvement     │ What it changes                          │
-├─────────────────┼──────────────────────────────────────────┤
-│ Dueling         │ Network parameterization                 │
-│ Double DQN      │ Which network selects max in target      │
-│ PER             │ Sample distribution + per-sample weight  │
-│ N-step          │ The TD target itself                     │
-└─────────────────┴──────────────────────────────────────────┘
+┌─────────────────┬──────────────────────────────────────────┬──────────────────────────────┐
+│ Improvement     │ What it changes                          │ Failure mode it fixes         │
+├─────────────────┼──────────────────────────────────────────┼──────────────────────────────┤
+│ Dueling         │ Network parameterization                 │ Wasted capacity / slow V      │
+│ Double DQN      │ Which network selects max in target      │ Max-operator overestimation   │
+│ PER (with IS)   │ Sample distribution + per-sample weight  │ Wasted gradient on solved txn │
+│ N-step          │ The TD target itself                     │ Slow credit propagation       │
+└─────────────────┴──────────────────────────────────────────┴──────────────────────────────┘
 ```
 
-Each lives in a different layer of the algorithm. They don't share gradients, don't read each other's outputs, and don't make assumptions about what the other components are doing. That's *why* they compose: orthogonal changes to orthogonal failure modes.
+Each lives in a different layer of the algorithm. They don't share gradients, don't read each other's outputs, and don't make assumptions about what the others are doing. **That's why they compose.**
 
-The combinations that *don't* compose cleanly are the ones that touch the same machinery. The classic example: PER without importance-sampling weights, in combination with Double DQN. PER biases sample frequency toward high-error transitions; Double DQN doesn't address that bias (it addresses a different bias on the target). Without IS weights, the two biases stack rather than canceling. Exercise 9 walks through this.
+The right mental model isn't "each improvement reduces bias and they add up." Each improvement is a **fix for a specific, independent bug** in vanilla DQN. The bugs don't interact, so the fixes don't interact. You can apply any subset of fixes; the unfixed bugs are still there but they don't break the fixes you applied.
+
+The interesting case is what happens when a fix is *incomplete* — for instance, PER without its IS weights. PER without IS weights doesn't introduce a new bias that interacts with Double DQN; it simply *leaves the PER sampling bias in place* (Section 2.3). Double DQN was never going to address that bias — it's solving a completely different problem (overestimation in the target). So "PER without IS + Double DQN" isn't two biases stacking on each other; it's one bug fixed (target overestimation) and another bug ignored (sampling bias). The resulting gradient is biased not because the fixes interfere, but because one of the bugs isn't actually being fixed. Exercise 9 walks through the gradient-signal analysis.
 
 ---
 
@@ -337,11 +440,13 @@ The text claims n-step Q-learning is "technically incorrect off-policy" but ever
 
 ---
 
-### Exercise 9 — Compose-or-cancel
+### Exercise 9 — Compose or stay broken
 
-For each combination below, decide whether it composes cleanly (gradient direction is unbiased w.r.t. uniform replay vanilla DQN) or stacks bias on bias. Argue from the *gradient signal*, not from intuition.
+For each combination below, decide whether the resulting gradient direction is **unbiased** (matches what vanilla DQN with uniform replay would compute in expectation, given the same true Q-function) or **biased** (systematically tilted from that target).
 
-| Combination | Composes cleanly? |
+Argue from the gradient signal, not from intuition. For each biased combination, identify exactly *which* bug isn't being fixed.
+
+| Combination | Unbiased? Which bug remains? |
 |---|---|
 | Dueling + Double DQN | ? |
 | Dueling + n-step | ? |
@@ -350,7 +455,7 @@ For each combination below, decide whether it composes cleanly (gradient directi
 | PER (with IS weights) + n-step | ? |
 | Double DQN + n-step | ? |
 
-For the "stacks bias on bias" cases, identify the bias each component introduces and explain why they don't cancel.
+**Part B.** For each combination you identified as "still biased": is the remaining bias a problem in *all* training regimes, or only specific ones (e.g., only early, only late)? Connect this back to the β-annealing argument in Section 2.4.
 
 ---
 
@@ -497,17 +602,21 @@ Your turn to write these in your own words. I'll polish and point out misunderst
 
 ## 10. Key Takeaways
 
-1. **Each improvement addresses a different failure mode.** Representation (Dueling), sample distribution (PER), target horizon (n-step). That's why they compose.
+1. **Each improvement is a fix for a different bug in vanilla DQN.** Representation (Dueling), sample distribution (PER), target horizon (n-step), max-bias (Double DQN). The bugs are independent, so the fixes don't interact — that's why they compose.
 
-2. **Dueling's prior pays off when actions don't matter most of the time.** Breakout fits the prior. So does most of Mario. Most environments do.
+2. **Dueling routes gradient signal to the shared baseline.** `V(s)` is updated on every transition touching `s`, not just transitions where a specific action was taken. The variance-reduction argument generalizes: same logic motivates baselines in REINFORCE (Phase 3).
 
-3. **PER is a tracking problem.** Priorities go stale. The IS weights and the ε floor are both bias-correction machinery for a sampler that's biased on purpose.
+3. **Anchoring `A` isn't optional.** Without it, the network can collapse Dueling back to vanilla DQN by sending all the signal to the A-head and zero to the V-head. Mean-subtraction anchors `V = mean_a Q(s, a)` and gives a smooth `V(θ)` (no argmax-flip kinks).
 
-4. **N-step is the Phase 1.3 bias-variance tradeoff, rediscovered.** Same axis. Same answer that 1-step ≠ ∞-step ≠ optimal.
+4. **PER is a sampler with two correction layers.** IS weights (`(1/(N·P(i)))^β`) algebraically cancel the priority weighting in expectation, recovering the uniform-sample gradient. The `ε` coverage floor prevents zero-error transitions from becoming permanently unreachable. Both layers exist because the sampler is biased on purpose.
 
-5. **Off-policy correctness is a real concern that we ignore most of the time.** When ε is small, the n-step window is approximately on-policy. When n is small, the off-policy bias window is short. We get away with it. Phase 3 will revisit this honestly.
+5. **PER is also a tracking problem.** Priorities go stale between resamplings, and the asymmetry (high priorities refresh often, low priorities don't) means classification errors persist.
 
-6. **Composition isn't free, but it's cheaper than you'd guess.** Two improvements that touch different parts of the algorithm stack with no cross-interaction. Two that touch the same machinery (PER without IS + Double DQN) silently corrupt each other's correctness.
+6. **N-step is credit-assignment depth.** 1-step DQN takes `~50` gradient rounds to propagate reward across 50 steps; n=3 takes `~17`. Same bias-variance tradeoff as Phase 1.3's MC↔TD axis — just rediscovered in deep RL.
+
+7. **Off-policy correctness is a real concern that we ignore most of the time.** When ε is small, the n-step window is approximately on-policy. When n is small, the off-policy bias window is short. We get away with it. Phase 3 will revisit this honestly.
+
+8. **The right composition model isn't "biases cancel" — it's "fixes don't interact."** Each improvement fixes one independent bug. Remove a fix, the corresponding bug comes back, but the *other* fixes still work correctly. Combinations that look like they "stack bias on bias" are actually just one bug left unfixed.
 
 ---
 
