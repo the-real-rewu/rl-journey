@@ -62,6 +62,13 @@ Each card should have:
 | [qlearning.md](qlearning.md) | Off-policy TD control; converges to Q*; optimistic about execution | 1.4 |
 | [on_off_policy.md](on_off_policy.md) | Behavior vs target policy; cliff-walking; why off-policy enables experience replay | 1.4 |
 
+### Deep RL — DQN Family
+
+| Skill | Summary | Phase |
+|-------|---------|-------|
+| [double_dqn.md](double_dqn.md) | Decouples action selection from evaluation to reduce max-operator overestimation bias | 2.3 |
+| [dueling_dqn.md](dueling_dqn.md) | Splits Q into V + advantage so the shared baseline learns from every transition | 2.4 |
+
 ### Policy Gradient Methods
 *(cards will be added as you work through Phase 3)*
 
