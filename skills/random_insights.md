@@ -1,6 +1,6 @@
 ---
 name: Random Insights
-description: Cross-cutting mental models about deep learning that don't belong to any single algorithm — inductive bias, architectural priors, and the structure-matching view of learning
+description: Cross-cutting mental models about deep learning — inductive bias, architectural priors, normalization as invariance, and the structure-matching view of learning
 type: concept
 ---
 
@@ -53,6 +53,30 @@ A common confusion: architectural priors and weight initialization both affect t
 Dueling's `Q = V + (A − mean A)` is a hard constraint on every forward pass. The network cannot learn to ignore it. This is why describing Dueling as "a better initialization" undersells it — it permanently reduces the hypothesis class, not just the starting entropy.
 
 The information-theoretic consequence: a smaller hypothesis class means fewer bits needed to describe the target (MDL principle), better generalization (less capacity for spurious patterns), and faster optimization (smaller search space throughout training).
+
+---
+
+## Normalization as invariance: what you throw away is the prior
+
+All normalization methods share one goal: keep activations in a stable regime so gradients stay predictable. But they differ in *which* invariance they encode — and that difference is a meaningful architectural choice, not just an engineering detail.
+
+The key question for any normalization technique: **what information is thrown away, and is that information actually useful?**
+
+Scale-shift invariance (BatchNorm, LayerNorm) says: multiply all activations by 10, add 5 — the network's behavior doesn't change. What survives is the *shape* of the activation distribution: the relative pattern of which features are large vs small, which are positive vs negative relative to the mean. The absolute position and scale are discarded.
+
+Scale-only invariance (RMSNorm) says: multiply by 10, but adding 5 *does* change the output. What survives is the *direction* of the activation vector in feature space — its angle, not its length.
+
+This distinction matters in LLMs because the residual stream of a transformer encodes semantic content in the **direction** of activation vectors (the "geometry" of representation space). LayerNorm's mean subtraction can rotate those directions; RMSNorm only rescales their magnitude, leaving direction intact. The weaker invariance is the better prior for the phenomenon.
+
+| Method | Normalizes across | Removes mean | What survives |
+|--------|------------------|--------------|---------------|
+| BatchNorm | batch (per feature) | yes | relative feature rankings across samples |
+| LayerNorm | features (per sample) | yes | shape of the feature distribution |
+| RMSNorm | features (per sample) | **no** | direction of the feature vector |
+
+BatchNorm also breaks at inference time for autoregressive generation (batch size 1, no batch statistics to compute) — a mismatch between the normalization's operating assumption and the deployment context. LayerNorm and RMSNorm normalize per-sample, so they're identical at batch size 1 and batch size 128.
+
+The general lesson: every normalization choice is a bet that certain information in the activations is noise (and should be thrown away) while the rest is signal (and should be preserved). Getting that bet wrong means the network has to fight the normalization to represent what it needs to — the same failure mode as any bad inductive prior.
 
 ---
 
