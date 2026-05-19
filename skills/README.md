@@ -83,6 +83,12 @@ Each card should have:
 |-------|---------|-------|
 | — | — | — |
 
+### Meta / Cross-Cutting
+
+| Skill | Summary | Phase |
+|-------|---------|-------|
+| [random_insights.md](random_insights.md) | Learning as structure matching, inductive bias, architectural priors, and the persistent-constraint vs initialization distinction | ongoing |
+
 ---
 
 *The best reference is the one you wrote yourself.*
